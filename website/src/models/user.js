@@ -519,7 +519,7 @@ UserSchema.pre('save', function(next) {
                   .concat(shared.content.userDefaults.todos)
                   .concat(shared.content.userDefaults.rewards);
 
-    async.each(defaultTasks, function(task, cb) {
+    Task.create(defaultTasks.map(function(task) {
       var newTask = _.cloneDeep(task);
       newTask.userId = self._id;
 
@@ -537,8 +537,8 @@ UserSchema.pre('save', function(next) {
         });
       }
 
-      Task.create(newTask, cb);
-    }, next);
+      return newTask;
+    }), next);
   }
 });
 
