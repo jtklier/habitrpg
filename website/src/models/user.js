@@ -409,6 +409,14 @@ var UserSchema = new Schema({
     ref: 'Challenge'
   }],
 
+  // List of habits/dailys/todos/rewards IDs to keep track of order
+  tasksOrder: {
+    habits: [{type: String, ref: 'Task'}],
+    rewards: [{type: String, ref: 'Task'}],
+    todos: [{type: String, ref: 'Task'}],
+    dailys: [{type: String, ref: 'Task'}]
+  },
+
   inbox: {
     newMessages: {type:Number, 'default':0},
     blocks: {type: Array},
@@ -435,10 +443,7 @@ UserSchema.post('init', function(doc){
 // Get all the tasks belonging to an user,
 // with their history
 // TODO filter just one or more types of tasks
-UserSchema.methods.getTasks = function(cb, types) {
-  var query = {
-    userId: this._id
-  };
+UserSchema.methods.getTasks = function(cb) {
   Task.find({
     userId: this._id
   }, function(err, tasks){
@@ -462,6 +467,7 @@ UserSchema.methods.toJSON = function() {
 // Return the data maintaining backward compatibility
 UserSchema.methods.getTransformedData = function(cb) {
   var obj = this.toJSON();
+  var tasksOrder = obj.tasksOrder; // Saving a reference because we won't return it
 
   this.getTasks(function(err, tasks) {
     if(err) return cb(err);
@@ -471,8 +477,23 @@ UserSchema.methods.getTransformedData = function(cb) {
     obj.todos = [];
     obj.rewards = [];
 
+    obj.tasksOrder = undefined;
+    var unordered = [];
+
     tasks.forEach(function(task){
-      obj[task.type + 's'].push(task.toJSON());
+      // We want to push the task at the same position where it's stored in tasksOrder
+      var pos = tasksOrder[task.type + 's'].indexOf(task._id);
+      if(pos === -1) { // Should never happen, it means the lists got out of sync
+        unordered.push(task.toJSON());
+      } else {
+        obj[task.type + 's'][pos] = task.toJSON();
+      }
+      
+    });
+
+    // Reconcile unordered items
+    unordered.forEach(function(task){
+      obj[task.type + 's'].push(task);
     });
 
     cb(null, obj);
@@ -505,9 +526,9 @@ UserSchema.pre('save', function(next) {
     Task.create(defaultTasks.map(function(task) {
       var newTask = _.cloneDeep(task);
       newTask.userId = self._id;
+      newTask._id = shared.uuid(); // Setting the id here because we need to access it for tasksOrder
 
       // Render task's text and notes in user's language
-
       newTask.text = newTask.text(self.preferences.language);
       if(newTask.notes) {
         newTask.notes = newTask.notes(self.preferences.language);
@@ -519,6 +540,9 @@ UserSchema.pre('save', function(next) {
           return checklistItem;
         });
       }
+
+      // Saving the order of tasks
+      self.tasksOrder[newTask.type + 's'].push(newTask._id);
 
       return newTask;
     }), next);
